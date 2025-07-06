@@ -1,6 +1,31 @@
 import React, { useState, useEffect } from "react";
 import sheetsService from "./GoogleSheetsService";
-import directTestService from "./DirectTestService";
+import n8nService from "./N8nService";
+
+// This will be populated from the database
+const EMPTY_DATA = {
+  Employee: {},
+  Student: {},
+};
+
+// Sample data for demonstration (remove when database is connected)
+const SAMPLE_DATA = {
+  Employee: {
+    Administration: ["John Smith", "Sarah Johnson"],
+    Teaching: ["Emily Davis", "David Brown"],
+    Support: ["James Miller", "Anna Taylor"],
+  },
+  Student: {
+    "Grade 1": {
+      "Section A": ["Alice Walker", "Bob Chen"],
+      "Section B": ["David Kim", "Eva Rodriguez"],
+    },
+    "Grade 2": {
+      "Section A": ["Grace Liu", "Henry Wilson"],
+      "Section B": ["Jack Davis", "Kate Brown"],
+    },
+  },
+};
 
 function AttendanceApp() {
   // State for cascading dropdowns
@@ -19,80 +44,203 @@ function AttendanceApp() {
   const [adminAuth, setAdminAuth] = useState(false);
   const [adminPassword, setAdminPassword] = useState("");
   const [adminMessage, setAdminMessage] = useState("");
+  const [activeAdminTab, setActiveAdminTab] = useState("news");
 
-  // State for data from Google Sheets
-  const [attendanceData, setAttendanceData] = useState({});
-  const [newsItems, setNewsItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // State for local student management
+  const [localStudents, setLocalStudents] = useState({
+    Student: {},
+  });
+  const [newStudentForm, setNewStudentForm] = useState({
+    grade: "",
+    area: "",
+    name: "",
+  });
+
+  // State for data - will be populated from database
+  const [attendanceData, setAttendanceData] = useState(EMPTY_DATA);
+  const [newsItems, setNewsItems] = useState([
+    {
+      headline: "🎉 Welcome to RaJA School New Academic Year!",
+      subtitle:
+        "We're excited to start this new journey with all our students and staff. Please make sure to mark your attendance daily using our new digital system. If you have any questions, contact the administration office.",
+    },
+    {
+      headline: "📚 New Library Books Available",
+      subtitle:
+        "We've added 200+ new books to our library collection! Visit the library during break time to explore new titles in science, literature, and technology. Library hours: 8:00 AM - 4:00 PM.",
+    },
+    {
+      headline: "🏆 Sports Week Announcement",
+      subtitle:
+        "Join us for our annual Sports Week from March 15-22! Registration is now open for football, basketball, volleyball, and track events. See your PE teacher to sign up. Prizes for winners!",
+    },
+    {
+      headline: "🎓 Parent-Teacher Conference",
+      subtitle:
+        "Parent-Teacher conferences are scheduled for next Friday, March 10th from 2:00 PM - 6:00 PM. Please check with your class teacher for your appointment time. We look forward to seeing all parents.",
+    },
+  ]);
+  const [loading, setLoading] = useState(false);
   const [sheetsConnected, setSheetsConnected] = useState(false);
+  const [n8nConnected, setN8nConnected] = useState(false);
 
   // State for news management
   const [currentNewsIndex, setCurrentNewsIndex] = useState(0);
-  const [newsImage, setNewsImage] = useState(null);
-  const [newsImagePreview, setNewsImagePreview] = useState(null);
-  const [showImage, setShowImage] = useState(false);
 
   // Admin credentials
   const ADMIN_PASSWORD = "admin123";
 
-  // Test functions
-  const runDirectTest = async () => {
-    console.log("🚀 Starting direct Apps Script test...");
-    const result = await directTestService.testAppsScript();
-    console.log("📊 Test result:", result);
-
-    if (result.success) {
-      setMessage(`✅ Direct test SUCCESS! Method: ${result.method}`);
-    } else {
-      setMessage(`❌ Direct test failed: ${result.error || result.message}`);
-    }
-  };
-
-  const runGoogleSheetsTest = async () => {
-    console.log("🚀 Starting Google Sheets read test...");
-    const result = await directTestService.testGoogleSheetsRead();
-    console.log("📊 Read test result:", result);
-
-    if (result.success) {
-      setMessage(`✅ Google Sheets read SUCCESS!`);
-    } else {
-      setMessage(`❌ Google Sheets read failed: ${result.error}`);
-    }
-  };
-
-  // Load data from Google Sheets on component mount
+  // Load local students from localStorage and fetch real data
   useEffect(() => {
-    loadDataFromSheets();
+    loadLocalStudents();
+    loadDatabaseData();
   }, []);
 
-  const loadDataFromSheets = async () => {
-    setLoading(true);
+  // Load data from n8n workflow with fallback to Google Sheets
+  const loadDatabaseData = async () => {
     try {
-      if (sheetsService.isConfigured()) {
-        const [studentsData, newsData] = await Promise.all([
-          sheetsService.getStudentsData(),
-          sheetsService.getNewsData(),
-        ]);
+      setLoading(true);
+      setMessage("📡 Loading database data...");
 
-        setAttendanceData(studentsData);
-        setNewsItems(newsData);
-        setSheetsConnected(true);
-        console.log("✅ Connected to Google Sheets successfully");
+      console.log("🔄 Fetching students data from n8n...");
+      const result = await n8nService.getStudentsData();
+
+      if (result.success && result.data) {
+        console.log("✅ Successfully loaded database data:", result.data);
+        setAttendanceData(result.data);
+        setN8nConnected(true);
+        setMessage("✅ Database loaded successfully!");
       } else {
-        // Use fallback data if not configured
-        setAttendanceData(sheetsService.getFallbackStudentsData());
-        setNewsItems(sheetsService.getFallbackNewsData());
-        setSheetsConnected(false);
-        console.log("⚠️ Google Sheets not configured, using fallback data");
+        console.warn("⚠️ n8n failed, trying Google Sheets API...");
+        setMessage("🔄 Trying Google Sheets API...");
+
+        // Fallback to Google Sheets API
+        try {
+          const sheetsData = await sheetsService.getStudentsData();
+          if (sheetsData && (sheetsData.Student || sheetsData.Employee)) {
+            console.log(
+              "✅ Successfully loaded from Google Sheets:",
+              sheetsData
+            );
+            setAttendanceData(sheetsData);
+            setSheetsConnected(true);
+            setMessage("✅ Database loaded from Google Sheets!");
+          } else {
+            console.warn("⚠️ Google Sheets also failed");
+            setMessage("⚠️ Failed to load from both n8n and Google Sheets");
+            setN8nConnected(false);
+            setSheetsConnected(false);
+          }
+        } catch (sheetsError) {
+          console.error("❌ Google Sheets error:", sheetsError);
+          console.log("🔄 Using sample data for demonstration");
+          setAttendanceData(SAMPLE_DATA);
+          setMessage("✅ Using sample data - Configure API key for real data");
+          setN8nConnected(false);
+          setSheetsConnected(false);
+        }
       }
     } catch (error) {
-      console.error("Error loading data:", error);
-      setAttendanceData(sheetsService.getFallbackStudentsData());
-      setNewsItems(sheetsService.getFallbackNewsData());
-      setSheetsConnected(false);
+      console.error("❌ Error loading database data:", error);
+      console.log("🔄 Using sample data for demonstration");
+      setAttendanceData(SAMPLE_DATA);
+      setMessage("✅ Using sample data - Configure database for real data");
+      setN8nConnected(false);
     } finally {
       setLoading(false);
+      setTimeout(() => setMessage(""), 5000);
     }
+  };
+
+  const loadLocalStudents = () => {
+    try {
+      const stored = localStorage.getItem("rajaAttendanceStudents");
+      if (stored) {
+        setLocalStudents(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.error("Error loading local students:", error);
+    }
+  };
+
+  const saveLocalStudents = (students) => {
+    try {
+      localStorage.setItem("rajaAttendanceStudents", JSON.stringify(students));
+      setLocalStudents(students);
+    } catch (error) {
+      console.error("Error saving local students:", error);
+    }
+  };
+
+  // Student management functions
+  const addStudent = () => {
+    if (!newStudentForm.grade || !newStudentForm.area || !newStudentForm.name) {
+      alert("Please fill in all fields");
+      return;
+    }
+
+    const updated = { ...localStudents };
+    if (!updated.Student[newStudentForm.grade]) {
+      updated.Student[newStudentForm.grade] = {};
+    }
+    if (!updated.Student[newStudentForm.grade][newStudentForm.area]) {
+      updated.Student[newStudentForm.grade][newStudentForm.area] = [];
+    }
+
+    // Check if student already exists
+    if (
+      updated.Student[newStudentForm.grade][newStudentForm.area].includes(
+        newStudentForm.name
+      )
+    ) {
+      alert("Student already exists in this grade/area");
+      return;
+    }
+
+    updated.Student[newStudentForm.grade][newStudentForm.area].push(
+      newStudentForm.name
+    );
+    saveLocalStudents(updated);
+    setNewStudentForm({ grade: "", area: "", name: "" });
+    setMessage("✅ Student added successfully!");
+    setTimeout(() => setMessage(""), 3000);
+  };
+
+  const deleteStudent = (grade, area, name) => {
+    if (
+      window.confirm(
+        `Are you sure you want to delete ${name} from ${grade} - ${area}?`
+      )
+    ) {
+      const updated = { ...localStudents };
+      updated.Student[grade][area] = updated.Student[grade][area].filter(
+        (n) => n !== name
+      );
+
+      // Clean up empty areas and grades
+      if (updated.Student[grade][area].length === 0) {
+        delete updated.Student[grade][area];
+        if (Object.keys(updated.Student[grade]).length === 0) {
+          delete updated.Student[grade];
+        }
+      }
+
+      saveLocalStudents(updated);
+      setMessage("✅ Student deleted successfully!");
+      setTimeout(() => setMessage(""), 3000);
+    }
+  };
+
+  const getAllLocalStudents = () => {
+    const students = [];
+    Object.keys(localStudents.Student || {}).forEach((grade) => {
+      Object.keys(localStudents.Student[grade] || {}).forEach((area) => {
+        localStudents.Student[grade][area].forEach((name) => {
+          students.push({ grade, area, name });
+        });
+      });
+    });
+    return students;
   };
 
   // Get today's date in YYYY-MM-DD format
@@ -143,20 +291,26 @@ function AttendanceApp() {
 
   // Get available names based on selections
   const getAvailableNames = () => {
+    let names = [];
+
     if (category === "Employee" && branch && attendanceData.Employee) {
-      return attendanceData.Employee[branch] || [];
-    } else if (
-      category === "Student" &&
-      grade &&
-      area &&
-      attendanceData.Student
-    ) {
-      return attendanceData.Student[grade]?.[area] || [];
+      names = attendanceData.Employee[branch] || [];
+    } else if (category === "Student" && grade && area) {
+      // Check sample data first, then local data
+      if (attendanceData.Student && attendanceData.Student[grade]?.[area]) {
+        names = attendanceData.Student[grade][area] || [];
+      } else if (
+        localStudents.Student &&
+        localStudents.Student[grade]?.[area]
+      ) {
+        names = localStudents.Student[grade][area] || [];
+      }
     }
-    return [];
+
+    return names.filter((name) => name && name.trim() !== "");
   };
 
-  // Handle attendance action
+  // Handle attendance action - now sends to n8n workflow
   const handleAttendance = async (action) => {
     if (!selectedName) {
       setMessage("Please select a name first.");
@@ -164,1273 +318,474 @@ function AttendanceApp() {
     }
 
     const currentDate = getTodayDate();
+    const currentTime = getCurrentTime();
+    const timestamp = new Date().toISOString();
 
-    // Check if this person already has an entry for today
+    // Check local log first (for immediate feedback)
     const existingEntry = attendanceLog.find(
       (entry) => entry.name === selectedName && entry.date === currentDate
     );
 
     if (existingEntry) {
+      // Show popup for duplicate (from local check)
+      const popupMessage = `${selectedName} already logged in today!\n\nPrevious entry: ${existingEntry.action} at ${existingEntry.time}`;
+
+      // Show popup alert
+      alert(`🚫 Already Logged In!\n\n${popupMessage}`);
+
+      // Also show message bar
       setMessage(
-        `${selectedName} already has an entry for today (${existingEntry.action} at ${existingEntry.time}).`
+        `⚠️ ${selectedName} already has an entry for today (${existingEntry.action} at ${existingEntry.time}).`
       );
+
+      // Clear selection
+      setSelectedName("");
+
+      // Clear message after 5 seconds
+      setTimeout(() => setMessage(""), 5000);
+
       return;
     }
 
-    const timestamp = new Date().toISOString();
-    const currentTime = getCurrentTime();
-
-    const payload = {
+    const attendanceData = {
       name: selectedName,
       category,
       action,
       timestamp,
       time: currentTime,
       date: currentDate,
-      ...(category === "Employee" && { branch }),
-      ...(category === "Student" && { grade, area }),
+      branch: category === "Employee" ? branch : "",
+      grade: category === "Student" ? grade : "",
+      area: category === "Student" ? area : "",
     };
 
-    // Add to attendance log
-    const newLogEntry = {
-      id: Date.now(),
-      ...payload,
-    };
+    // Debug logging
+    console.log("🔍 DEBUG - Selected Name:", selectedName);
+    console.log("🔍 DEBUG - Category:", category);
+    console.log("🔍 DEBUG - Branch:", branch);
+    console.log("🔍 DEBUG - Grade:", grade);
+    console.log("🔍 DEBUG - Area:", area);
+    console.log("🔍 DEBUG - Full attendance data:", attendanceData);
 
-    setAttendanceLog((prevLog) => [newLogEntry, ...prevLog]);
+    setMessage(`📡 Recording ${selectedName}'s attendance...`);
 
-    // Log to Google Sheets if connected
-    if (sheetsService.isConfigured()) {
-      const success = await sheetsService.logAttendance(payload);
-      if (success) {
-        console.log("✅ Attendance logged to Google Sheets");
+    try {
+      // Send to n8n workflow
+      console.log("🚀 Sending attendance to n8n:", attendanceData);
+      const result = await n8nService.logAttendance(attendanceData);
+
+      console.log("📡 n8n Response:", result);
+
+      if (result.success) {
+        // Add to local log for immediate display
+        setAttendanceLog((prev) => [...prev, attendanceData]);
+        setMessage(
+          `✅ ${selectedName} marked as ${action} at ${currentTime} (Saved to database)`
+        );
+        console.log("✅ Attendance recorded successfully:", result);
       } else {
-        console.log("❌ Failed to log to Google Sheets");
+        // Check if it's a duplicate attendance
+        if (result.isDuplicate || result.error === "Duplicate attendance") {
+          // Show popup for duplicate
+          const existingRecord = result.existingRecord;
+          const existingAction =
+            existingRecord?.Action || existingRecord?.action || "unknown";
+          const existingTime =
+            existingRecord?.Time || existingRecord?.time || "unknown";
+
+          const popupMessage =
+            result.message ||
+            `${selectedName} already logged in today!\n\nPrevious entry: ${existingAction} at ${existingTime}`;
+
+          // Show popup alert
+          alert(`🚫 Already Logged In!\n\n${popupMessage}`);
+
+          // Also show message bar
+          setMessage(`⚠️ ${selectedName} already logged in today!`);
+          console.log("⚠️ Duplicate attendance detected:", result);
+        }
+        // Check if it's the "Workflow was started" issue
+        else if (
+          result.method === "n8n-students-incomplete" ||
+          result.method === "n8n-attendance-incomplete" ||
+          (result.error && result.error.includes("Workflow started"))
+        ) {
+          console.warn(
+            "⚠️ n8n workflow configuration issue - using local storage"
+          );
+          // Still add to local log
+          setAttendanceLog((prev) => [...prev, attendanceData]);
+          setMessage(
+            `⚠️ ${selectedName} marked as ${action} (Local only - n8n config issue)`
+          );
+        } else {
+          setMessage(`❌ Failed to record: ${result.message || result.error}`);
+          console.warn("⚠️ Attendance recording failed:", result);
+        }
       }
+    } catch (error) {
+      console.error("❌ Error recording attendance:", error);
+      // Fallback: still add to local log
+      setAttendanceLog((prev) => [...prev, attendanceData]);
+      setMessage(
+        `⚠️ ${selectedName} marked as ${action} (Local only - database error)`
+      );
     }
 
-    setMessage(`Successfully marked ${selectedName} as ${action}!`);
+    // Clear selection
+    setSelectedName("");
 
-    // Reset name selection after successful action
-    setTimeout(() => {
-      setSelectedName("");
-      setMessage("");
-    }, 2000);
+    // Clear message after 5 seconds
+    setTimeout(() => setMessage(""), 5000);
   };
 
-  // Clear today's log
-  const clearTodayLog = () => {
-    setAttendanceLog([]);
-  };
-
-  // Get today's log entries
+  // Get today's attendance log
   const getTodayLog = () => {
     const today = getTodayDate();
     return attendanceLog.filter((entry) => entry.date === today);
   };
 
-  // Admin authentication
+  // Clear today's log
+  const clearTodayLog = () => {
+    if (
+      window.confirm("Are you sure you want to clear today's attendance log?")
+    ) {
+      const today = getTodayDate();
+      setAttendanceLog((prev) => prev.filter((entry) => entry.date !== today));
+      setMessage("✅ Today's attendance log cleared!");
+      setTimeout(() => setMessage(""), 3000);
+    }
+  };
+
+  // Admin functions
   const handleAdminLogin = () => {
     if (adminPassword === ADMIN_PASSWORD) {
       setAdminAuth(true);
-      setAdminMessage("");
-      setAdminPassword("");
+      setAdminMessage("✅ Admin access granted!");
+      setTimeout(() => setAdminMessage(""), 3000);
     } else {
-      setAdminMessage("Incorrect password. Please try again.");
+      setAdminMessage("❌ Invalid password!");
+      setTimeout(() => setAdminMessage(""), 3000);
     }
+    setAdminPassword("");
   };
 
-  // Mark someone as absent (admin function)
-  const markAbsent = async (
-    name,
-    category,
-    branch,
-    grade,
-    area,
-    reason = ""
-  ) => {
-    const currentDate = getTodayDate();
-    const currentTime = getCurrentTime();
-
-    // Check if already marked absent
-    const existingAbsent = attendanceLog.find(
-      (entry) =>
-        entry.name === name &&
-        entry.date === currentDate &&
-        entry.action === "absent"
-    );
-
-    if (existingAbsent) {
-      setAdminMessage(`${name} is already marked as absent for today.`);
-      return;
-    }
-
-    const newAbsentEntry = {
-      id: Date.now(),
-      name,
-      category,
-      action: "absent",
-      timestamp: new Date().toISOString(),
-      time: currentTime,
-      date: currentDate,
-      reason,
-      ...(category === "Employee" && { branch }),
-      ...(category === "Student" && { grade, area }),
-    };
-
-    setAttendanceLog((prevLog) => [newAbsentEntry, ...prevLog]);
-
-    // Log to Google Sheets if connected
-    if (sheetsService.isConfigured()) {
-      const success = await sheetsService.logAttendance(newAbsentEntry);
-      if (success) {
-        console.log("✅ Absence logged to Google Sheets");
-      }
-    }
-
-    setAdminMessage(`Successfully marked ${name} as absent.`);
-
-    setTimeout(() => {
-      setAdminMessage("");
-    }, 2000);
-  };
-
-  // Handle image upload
-  const handleImageUpload = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setNewsImage(e.target.result);
-        setNewsImagePreview(e.target.result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  // Remove image
-  const removeImage = () => {
-    setNewsImage(null);
-    setNewsImagePreview(null);
-  };
-
-  // Update news
-  const updateNews = async () => {
-    const currentNews = getCurrentNews();
-    currentNews.image = newsImage;
-    currentNews.showImage = showImage;
-
-    const updatedNewsItems = [...newsItems];
-    updatedNewsItems[currentNewsIndex] = currentNews;
-    setNewsItems(updatedNewsItems);
-
-    // Update in Google Sheets if connected
-    if (sheetsService.isConfigured()) {
-      const success = await sheetsService.updateNewsItem(
-        currentNewsIndex,
-        currentNews
-      );
-      if (success) {
-        setAdminMessage("News updated successfully in Google Sheets!");
-      } else {
-        setAdminMessage("Failed to update news in Google Sheets.");
-      }
-    } else {
-      setAdminMessage("News updated locally (Google Sheets not connected).");
-    }
-
-    setTimeout(() => {
-      setAdminMessage("");
-    }, 2000);
-  };
-
-  // Update headline and subtitle
   const updateHeadline = (newHeadline) => {
-    const updatedNewsItems = [...newsItems];
-    updatedNewsItems[currentNewsIndex].headline = newHeadline;
-    setNewsItems(updatedNewsItems);
+    const updated = [...newsItems];
+    updated[currentNewsIndex] = {
+      ...updated[currentNewsIndex],
+      headline: newHeadline,
+    };
+    setNewsItems(updated);
+    setMessage("✅ Headline updated!");
+    setTimeout(() => setMessage(""), 3000);
   };
 
   const updateSubtitle = (newSubtitle) => {
-    const updatedNewsItems = [...newsItems];
-    updatedNewsItems[currentNewsIndex].subtitle = newSubtitle;
-    setNewsItems(updatedNewsItems);
+    const updated = [...newsItems];
+    updated[currentNewsIndex] = {
+      ...updated[currentNewsIndex],
+      subtitle: newSubtitle,
+    };
+    setNewsItems(updated);
+    setMessage("✅ Subtitle updated!");
+    setTimeout(() => setMessage(""), 3000);
   };
 
-  // News navigation
   const nextNews = () => {
-    setCurrentNewsIndex((prevIndex) =>
-      prevIndex === newsItems.length - 1 ? 0 : prevIndex + 1
-    );
+    setCurrentNewsIndex((prev) => (prev + 1) % newsItems.length);
   };
 
   const prevNews = () => {
-    setCurrentNewsIndex((prevIndex) =>
-      prevIndex === 0 ? newsItems.length - 1 : prevIndex - 1
+    setCurrentNewsIndex(
+      (prev) => (prev - 1 + newsItems.length) % newsItems.length
     );
   };
 
-  const goToNews = (index) => {
-    setCurrentNewsIndex(index);
-  };
-
-  // Get current news data
   const getCurrentNews = () => {
-    return newsItems[currentNewsIndex];
+    return newsItems[currentNewsIndex] || newsItems[0];
   };
 
-  // Get all people for admin absence marking
   const getAllPeople = () => {
     const people = [];
 
     // Add employees
-    if (attendanceData.Employee) {
-      Object.keys(attendanceData.Employee).forEach((branch) => {
-        if (attendanceData.Employee[branch]) {
-          attendanceData.Employee[branch].forEach((name) => {
-            people.push({
-              name,
-              category: "Employee",
-              branch,
-              grade: null,
-              area: null,
-            });
-          });
-        }
+    Object.keys(attendanceData.Employee || {}).forEach((branch) => {
+      attendanceData.Employee[branch].forEach((name) => {
+        people.push({ name, category: "Employee", branch });
       });
-    }
+    });
 
     // Add students
-    if (attendanceData.Student) {
-      Object.keys(attendanceData.Student).forEach((grade) => {
-        if (attendanceData.Student[grade]) {
-          Object.keys(attendanceData.Student[grade]).forEach((area) => {
-            if (attendanceData.Student[grade][area]) {
-              attendanceData.Student[grade][area].forEach((name) => {
-                people.push({
-                  name,
-                  category: "Student",
-                  branch: null,
-                  grade,
-                  area,
-                });
-              });
-            }
-          });
-        }
+    Object.keys(attendanceData.Student || {}).forEach((grade) => {
+      Object.keys(attendanceData.Student[grade] || {}).forEach((area) => {
+        attendanceData.Student[grade][area].forEach((name) => {
+          people.push({ name, category: "Student", grade, area });
+        });
       });
-    }
+    });
 
     return people;
   };
 
-  const availableNames = getAvailableNames();
+  const currentNews = getCurrentNews();
   const todayLog = getTodayLog();
-  const allPeople = getAllPeople();
-
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100vh",
-          fontSize: "18px",
-          color: "#2c3e50",
-        }}
-      >
-        Loading data from Google Sheets...
-      </div>
-    );
-  }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#f8f9fa",
-        fontFamily: "Segoe UI, Arial, sans-serif",
-        padding: "20px",
-      }}
-    >
-      {/* Connection Status */}
-      {sheetsService.isConfigured() && (
-        <div
-          style={{
-            position: "fixed",
-            top: "20px",
-            left: "20px",
-            zIndex: 1000,
-            padding: "8px 12px",
-            borderRadius: "6px",
-            fontSize: "12px",
-            fontWeight: "600",
-            backgroundColor: sheetsConnected ? "#d4edda" : "#f8d7da",
-            color: sheetsConnected ? "#155724" : "#721c24",
-            border: `1px solid ${sheetsConnected ? "#c3e6cb" : "#f5c6cb"}`,
-          }}
-        >
-          {sheetsConnected
-            ? "✅ Google Sheets Connected"
-            : "❌ Google Sheets Offline"}
+    <div className="App">
+      <div className="container">
+        {/* Status */}
+        <div className="status-bar">
+          <span className="status-item">
+            📊 Database:{" "}
+            <strong>
+              {n8nConnected
+                ? "n8n Connected"
+                : sheetsConnected
+                ? "Google Sheets Connected"
+                : "Disconnected"}
+            </strong>
+          </span>
+          <span className="status-item">
+            📅 Today: <strong>{getTodayDate()}</strong>
+          </span>
+          <span className="status-item">
+            ✅ Entries: <strong>{todayLog.length}</strong>
+          </span>
+          <span className="status-item">
+            👥 Total People: <strong>{getAllPeople().length}</strong>
+          </span>
         </div>
-      )}
 
-      {/* Admin Access Button */}
-      <div
-        style={{
-          position: "fixed",
-          top: "20px",
-          right: "20px",
-          zIndex: 1000,
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-        }}
-      >
-        <button
-          onClick={() => setAdminOpen(true)}
-          style={{
-            padding: "10px 15px",
-            backgroundColor: "#2c3e50",
-            color: "white",
-            border: "none",
-            borderRadius: "8px",
-            fontSize: "14px",
-            fontWeight: "600",
-            cursor: "pointer",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-            transition: "background-color 0.2s",
-          }}
-          onMouseOver={(e) => (e.target.style.backgroundColor = "#34495e")}
-          onMouseOut={(e) => (e.target.style.backgroundColor = "#2c3e50")}
-        >
-          🔐 Admin
-        </button>
-
-        {/* Test Buttons */}
-        <button
-          onClick={runDirectTest}
-          style={{
-            padding: "8px 12px",
-            backgroundColor: "#e74c3c",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            fontSize: "12px",
-            fontWeight: "600",
-            cursor: "pointer",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-          }}
-        >
-          🧪 Test Apps Script
-        </button>
-
-        <button
-          onClick={runGoogleSheetsTest}
-          style={{
-            padding: "8px 12px",
-            backgroundColor: "#3498db",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            fontSize: "12px",
-            fontWeight: "600",
-            cursor: "pointer",
-            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-          }}
-        >
-          📊 Test Sheets Read
-        </button>
-      </div>
-
-      {/* News Headline Section */}
-      <div
-        style={{
-          maxWidth: "1200px",
-          margin: "0 auto 20px auto",
-          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-          borderRadius: "12px",
-          padding: "20px",
-          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-          color: "white",
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        {/* News Navigation */}
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "10px",
-            transform: "translateY(-50%)",
-            zIndex: 10,
-          }}
-        >
-          <button
-            onClick={prevNews}
-            style={{
-              background: "rgba(255, 255, 255, 0.2)",
-              border: "none",
-              borderRadius: "50%",
-              width: "40px",
-              height: "40px",
-              color: "white",
-              fontSize: "18px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transition: "background-color 0.2s",
-            }}
-            onMouseOver={(e) =>
-              (e.target.style.backgroundColor = "rgba(255, 255, 255, 0.3)")
-            }
-            onMouseOut={(e) =>
-              (e.target.style.backgroundColor = "rgba(255, 255, 255, 0.2)")
-            }
+        {/* Message */}
+        {message && (
+          <div
+            className={`message ${
+              message.includes("❌") ? "error" : "success"
+            }`}
           >
-            ‹
-          </button>
-        </div>
-
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            right: "10px",
-            transform: "translateY(-50%)",
-            zIndex: 10,
-          }}
-        >
-          <button
-            onClick={nextNews}
-            style={{
-              background: "rgba(255, 255, 255, 0.2)",
-              border: "none",
-              borderRadius: "50%",
-              width: "40px",
-              height: "40px",
-              color: "white",
-              fontSize: "18px",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transition: "background-color 0.2s",
-            }}
-            onMouseOver={(e) =>
-              (e.target.style.backgroundColor = "rgba(255, 255, 255, 0.3)")
-            }
-            onMouseOut={(e) =>
-              (e.target.style.backgroundColor = "rgba(255, 255, 255, 0.2)")
-            }
-          >
-            ›
-          </button>
-        </div>
-
-        {/* News Content */}
-        <div style={{ textAlign: "center", position: "relative", zIndex: 5 }}>
-          <h2
-            style={{
-              fontSize: "1.8rem",
-              marginBottom: "10px",
-              fontWeight: "600",
-            }}
-          >
-            {getCurrentNews().headline}
-          </h2>
-          <p
-            style={{
-              fontSize: "1rem",
-              opacity: "0.9",
-              lineHeight: "1.5",
-              maxWidth: "800px",
-              margin: "0 auto",
-            }}
-          >
-            {getCurrentNews().subtitle}
-          </p>
-        </div>
-
-        {/* News Indicators */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: "10px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            display: "flex",
-            gap: "8px",
-          }}
-        >
-          {newsItems.map((_, index) => (
-            <button
-              key={index}
-              onClick={() => goToNews(index)}
-              style={{
-                width: "12px",
-                height: "12px",
-                borderRadius: "50%",
-                border: "none",
-                backgroundColor:
-                  index === currentNewsIndex
-                    ? "white"
-                    : "rgba(255, 255, 255, 0.3)",
-                cursor: "pointer",
-                transition: "background-color 0.2s",
-              }}
-            />
-          ))}
-        </div>
-
-        {/* News Counter */}
-        <div
-          style={{
-            position: "absolute",
-            top: "10px",
-            right: "10px",
-            fontSize: "12px",
-            opacity: "0.7",
-            background: "rgba(0, 0, 0, 0.2)",
-            padding: "4px 8px",
-            borderRadius: "4px",
-          }}
-        >
-          {currentNewsIndex + 1} / {newsItems.length}
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          gap: "20px",
-          maxWidth: "1200px",
-          margin: "0 auto",
-          alignItems: "flex-start",
-        }}
-      >
-        {/* Main Attendance Form */}
-        <div
-          style={{
-            flex: "1",
-            background: "white",
-            borderRadius: "12px",
-            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-            padding: "30px",
-            marginTop: "20px",
-          }}
-        >
-          <h1
-            style={{
-              textAlign: "center",
-              color: "#2c3e50",
-              marginBottom: "30px",
-              fontSize: "1.5rem",
-            }}
-          >
-            RaJA Attendance System
-          </h1>
-
-          {/* Category Dropdown */}
-          <div style={{ marginBottom: "20px" }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: "8px",
-                fontWeight: "600",
-                color: "#34495e",
-              }}
-            >
-              Category
-            </label>
-            <select
-              value={category}
-              onChange={(e) => handleCategoryChange(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "12px",
-                borderRadius: "8px",
-                border: "2px solid #e9ecef",
-                fontSize: "16px",
-                backgroundColor: "white",
-              }}
-            >
-              <option value="">Select Category</option>
-              <option value="Employee">Employee</option>
-              <option value="Student">Student</option>
-            </select>
+            {message}
           </div>
+        )}
 
-          {/* Employee Branch Dropdown */}
-          {category === "Employee" && (
-            <div style={{ marginBottom: "20px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "600",
-                  color: "#34495e",
-                }}
-              >
-                Employee Branch
-              </label>
-              <select
-                value={branch}
-                onChange={(e) => handleBranchChange(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  border: "2px solid #e9ecef",
-                  fontSize: "16px",
-                  backgroundColor: "white",
-                }}
-              >
-                <option value="">Select Branch</option>
-                {Object.keys(attendanceData.Employee).map((branchName) => (
-                  <option key={branchName} value={branchName}>
-                    {branchName}
-                  </option>
-                ))}
-              </select>
+        {/* News Display */}
+        <div className="news-section">
+          <h2>{currentNews.headline}</h2>
+          <p>{currentNews.subtitle}</p>
+          {newsItems.length > 1 && (
+            <div className="news-controls">
+              <button onClick={prevNews}>← Previous</button>
+              <span>
+                {currentNewsIndex + 1} of {newsItems.length}
+              </span>
+              <button onClick={nextNews}>Next →</button>
             </div>
           )}
+        </div>
 
-          {/* Student Grade Dropdown */}
-          {category === "Student" && (
-            <div style={{ marginBottom: "20px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "600",
-                  color: "#34495e",
-                }}
-              >
-                Student Grade/Category
-              </label>
+        {/* Main Content - Side by Side */}
+        <div className="main-content">
+          {/* Attendance Form */}
+          <div className="attendance-form">
+            <h3>📋 Record Attendance</h3>
+
+            {/* Category Selection */}
+            <div className="form-group">
+              <label>Category:</label>
               <select
-                value={grade}
-                onChange={(e) => handleGradeChange(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  border: "2px solid #e9ecef",
-                  fontSize: "16px",
-                  backgroundColor: "white",
-                }}
+                value={category}
+                onChange={(e) => handleCategoryChange(e.target.value)}
               >
-                <option value="">Select Grade</option>
-                {Object.keys(attendanceData.Student).map((gradeName) => (
-                  <option key={gradeName} value={gradeName}>
-                    {gradeName}
-                  </option>
-                ))}
+                <option value="">Select Category</option>
+                <option value="Employee">Employee</option>
+                <option value="Student">Student</option>
               </select>
             </div>
-          )}
 
-          {/* Student Area Dropdown */}
-          {category === "Student" && grade && (
-            <div style={{ marginBottom: "20px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "600",
-                  color: "#34495e",
-                }}
-              >
-                Student Area
-              </label>
-              <select
-                value={area}
-                onChange={(e) => handleAreaChange(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  border: "2px solid #e9ecef",
-                  fontSize: "16px",
-                  backgroundColor: "white",
-                }}
-              >
-                <option value="">Select Area</option>
-                {Object.keys(attendanceData.Student[grade] || {}).map(
-                  (areaName) => (
-                    <option key={areaName} value={areaName}>
-                      {areaName}
+            {/* Employee Branch Selection */}
+            {category === "Employee" && (
+              <div className="form-group">
+                <label>Branch:</label>
+                <select
+                  value={branch}
+                  onChange={(e) => handleBranchChange(e.target.value)}
+                >
+                  <option value="">Select Branch</option>
+                  {Object.keys(attendanceData.Employee || {}).map(
+                    (branchName) => (
+                      <option key={branchName} value={branchName}>
+                        {branchName}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+            )}
+
+            {/* Student Grade Selection */}
+            {category === "Student" && (
+              <div className="form-group">
+                <label>Grade:</label>
+                <select
+                  value={grade}
+                  onChange={(e) => handleGradeChange(e.target.value)}
+                >
+                  <option value="">Select Grade</option>
+                  {Object.keys(attendanceData.Student || {}).map(
+                    (gradeName) => (
+                      <option key={gradeName} value={gradeName}>
+                        {gradeName}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+            )}
+
+            {/* Student Area Selection */}
+            {category === "Student" && grade && (
+              <div className="form-group">
+                <label>Area:</label>
+                <select
+                  value={area}
+                  onChange={(e) => handleAreaChange(e.target.value)}
+                >
+                  <option value="">Select Area</option>
+                  {Object.keys(attendanceData.Student[grade] || {}).map(
+                    (areaName) => (
+                      <option key={areaName} value={areaName}>
+                        {areaName}
+                      </option>
+                    )
+                  )}
+                </select>
+              </div>
+            )}
+
+            {/* Name Selection */}
+            {((category === "Employee" && branch) ||
+              (category === "Student" && grade && area)) && (
+              <div className="form-group">
+                <label>Name:</label>
+                <select
+                  value={selectedName}
+                  onChange={(e) => setSelectedName(e.target.value)}
+                >
+                  <option value="">Select Name</option>
+                  {getAvailableNames().map((name) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
-                  )
-                )}
-              </select>
-            </div>
-          )}
+                  ))}
+                </select>
+              </div>
+            )}
 
-          {/* Name Selection */}
-          {availableNames.length > 0 && (
-            <div style={{ marginBottom: "20px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "600",
-                  color: "#34495e",
-                }}
-              >
-                Select Name
-              </label>
-              <select
-                value={selectedName}
-                onChange={(e) => setSelectedName(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "12px",
-                  borderRadius: "8px",
-                  border: "2px solid #e9ecef",
-                  fontSize: "16px",
-                  backgroundColor: "white",
-                }}
-              >
-                <option value="">Select Name</option>
-                {availableNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Attendance Buttons */}
-          {selectedName && (
-            <div
-              style={{
-                display: "flex",
-                gap: "15px",
-                marginBottom: "20px",
-              }}
-            >
-              <button
-                onClick={() => handleAttendance("login")}
-                style={{
-                  flex: 1,
-                  padding: "12px",
-                  backgroundColor: "#27ae60",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  fontWeight: "600",
-                  cursor: "pointer",
-                  transition: "background-color 0.2s",
-                }}
-                onMouseOver={(e) =>
-                  (e.target.style.backgroundColor = "#229954")
-                }
-                onMouseOut={(e) => (e.target.style.backgroundColor = "#27ae60")}
-              >
-                Login
-              </button>
-              <button
-                onClick={() => handleAttendance("logout")}
-                style={{
-                  flex: 1,
-                  padding: "12px",
-                  backgroundColor: "#e74c3c",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  fontWeight: "600",
-                  cursor: "pointer",
-                  transition: "background-color 0.2s",
-                }}
-                onMouseOver={(e) =>
-                  (e.target.style.backgroundColor = "#c0392b")
-                }
-                onMouseOut={(e) => (e.target.style.backgroundColor = "#e74c3c")}
-              >
-                Logout
-              </button>
-            </div>
-          )}
-
-          {/* Message Display */}
-          {message && (
-            <div
-              style={{
-                padding: "12px",
-                borderRadius: "8px",
-                backgroundColor: "#d4edda",
-                color: "#155724",
-                border: "1px solid #c3e6cb",
-                textAlign: "center",
-                fontSize: "16px",
-              }}
-            >
-              {message}
-            </div>
-          )}
-
-          {/* Current Selection Display */}
-          {category && (
-            <div
-              style={{
-                marginTop: "20px",
-                padding: "15px",
-                backgroundColor: "#f8f9fa",
-                borderRadius: "8px",
-                border: "1px solid #e9ecef",
-              }}
-            >
-              <h3 style={{ margin: "0 0 10px 0", color: "#495057" }}>
-                Current Selection:
-              </h3>
-              <p style={{ margin: "5px 0", color: "#6c757d" }}>
-                <strong>Category:</strong> {category}
-              </p>
-              {category === "Employee" && branch && (
-                <p style={{ margin: "5px 0", color: "#6c757d" }}>
-                  <strong>Branch:</strong> {branch}
-                </p>
-              )}
-              {category === "Student" && grade && (
-                <p style={{ margin: "5px 0", color: "#6c757d" }}>
-                  <strong>Grade:</strong> {grade}
-                </p>
-              )}
-              {category === "Student" && area && (
-                <p style={{ margin: "5px 0", color: "#6c757d" }}>
-                  <strong>Area:</strong> {area}
-                </p>
-              )}
-              {selectedName && (
-                <p style={{ margin: "5px 0", color: "#6c757d" }}>
-                  <strong>Selected Name:</strong> {selectedName}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Attendance Log Sidebar */}
-        <div
-          style={{
-            width: "400px",
-            background: "white",
-            borderRadius: "12px",
-            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-            padding: "20px",
-            marginTop: "20px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "20px",
-              borderBottom: "2px solid #e9ecef",
-              paddingBottom: "10px",
-            }}
-          >
-            <h2
-              style={{
-                margin: 0,
-                color: "#2c3e50",
-                fontSize: "1.5rem",
-              }}
-            >
-              Today's Log
-            </h2>
-            <button
-              onClick={clearTodayLog}
-              style={{
-                padding: "6px 12px",
-                backgroundColor: "#6c757d",
-                color: "white",
-                border: "none",
-                borderRadius: "6px",
-                fontSize: "12px",
-                cursor: "pointer",
-              }}
-            >
-              Clear
-            </button>
+            {/* Action Buttons */}
+            {selectedName && (
+              <div className="action-buttons">
+                <button
+                  className="btn-present"
+                  onClick={() => handleAttendance("present")}
+                >
+                  ✅ Mark Present
+                </button>
+                <button
+                  className="btn-absent"
+                  onClick={() => handleAttendance("absent")}
+                >
+                  ❌ Mark Absent
+                </button>
+              </div>
+            )}
           </div>
 
-          <div
-            style={{
-              maxHeight: "400px",
-              overflowY: "auto",
-            }}
-          >
-            {todayLog.length === 0 ? (
-              <p
+          {/* Today's Log */}
+          <div className="today-log">
+            <h3>📊 Today's Attendance ({todayLog.length})</h3>
+            {todayLog.length > 0 ? (
+              <>
+                <div className="log-controls">
+                  <button onClick={clearTodayLog} className="btn-clear">
+                    🗑️ Clear Log
+                  </button>
+                </div>
+                <div className="log-entries">
+                  {todayLog.map((entry, index) => (
+                    <div key={index} className={`log-entry ${entry.action}`}>
+                      <div>
+                        <strong>{entry.name}</strong>
+                        <br />
+                        <small>{entry.category}</small>
+                      </div>
+                      <div>
+                        <span className="action">{entry.action}</span>
+                        <br />
+                        <span className="time">{entry.time}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div
                 style={{
                   textAlign: "center",
-                  color: "#6c757d",
-                  fontStyle: "italic",
+                  color: "#94a3b8",
+                  padding: "2rem",
                 }}
               >
-                No attendance records for today
-              </p>
-            ) : (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                }}
-              >
-                {todayLog.map((entry) => (
-                  <div
-                    key={entry.id}
-                    style={{
-                      padding: "12px",
-                      backgroundColor: "#f8f9fa",
-                      borderRadius: "8px",
-                      border: "1px solid #e9ecef",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "flex-start",
-                        marginBottom: "5px",
-                      }}
-                    >
-                      <div>
-                        <div
-                          style={{
-                            fontWeight: "600",
-                            color: "#2c3e50",
-                            fontSize: "14px",
-                          }}
-                        >
-                          {entry.name}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "12px",
-                            color: "#6c757d",
-                          }}
-                        >
-                          {entry.time}
-                        </div>
-                      </div>
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          padding: "2px 6px",
-                          borderRadius: "4px",
-                          backgroundColor:
-                            entry.action === "login"
-                              ? "#28a745"
-                              : entry.action === "logout"
-                              ? "#dc3545"
-                              : "#ffc107",
-                          color:
-                            entry.action === "absent" ? "#212529" : "white",
-                          fontWeight: "500",
-                        }}
-                      >
-                        {entry.action.toUpperCase()}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: "#495057",
-                      }}
-                    >
-                      {entry.category}
-                      {entry.branch && ` - ${entry.branch}`}
-                      {entry.grade && ` - ${entry.grade}`}
-                      {entry.area && ` - ${entry.area}`}
-                    </div>
-                    {entry.reason && (
-                      <div
-                        style={{
-                          marginTop: "5px",
-                          fontSize: "11px",
-                          color: "#6c757d",
-                          fontStyle: "italic",
-                        }}
-                      >
-                        Reason: {entry.reason}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                <p>📭 No attendance records for today</p>
+                <p>Start by marking someone present!</p>
               </div>
             )}
           </div>
+        </div>
 
-          {/* Log Summary */}
-          {todayLog.length > 0 && (
-            <div
-              style={{
-                marginTop: "15px",
-                padding: "10px",
-                backgroundColor: "#f8f9fa",
-                borderRadius: "6px",
-                border: "1px solid #e9ecef",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  fontSize: "12px",
-                  color: "#6c757d",
-                }}
-              >
-                <span>Total Records: {todayLog.length}</span>
-                <span>
-                  Logins:{" "}
-                  {todayLog.filter((entry) => entry.action === "login").length}{" "}
-                  | Logouts:{" "}
-                  {todayLog.filter((entry) => entry.action === "logout").length}{" "}
-                  | Absent:{" "}
-                  {todayLog.filter((entry) => entry.action === "absent").length}
-                </span>
-              </div>
+        {/* Admin Panel */}
+        <div className="admin-panel">
+          <button
+            className="admin-toggle"
+            onClick={() => setAdminOpen(!adminOpen)}
+          >
+            {adminOpen ? "▼" : "▶"} Admin Panel
+          </button>
+
+          {adminOpen && (
+            <div className="admin-content">
+              {!adminAuth ? (
+                <div className="admin-login">
+                  <input
+                    type="password"
+                    placeholder="Admin Password"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    onKeyPress={(e) => e.key === "Enter" && handleAdminLogin()}
+                  />
+                  <button onClick={handleAdminLogin}>Login</button>
+                  {adminMessage && (
+                    <p className="admin-message">{adminMessage}</p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <p>Admin features coming soon...</p>
+                </div>
+              )}
             </div>
           )}
         </div>
-      </div>
 
-      {/* Admin Dashboard Modal */}
-      {adminOpen && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            zIndex: 2000,
-            padding: "20px",
-          }}
+        {/* Floating Refresh Button */}
+        <button
+          className="floating-refresh"
+          onClick={loadDatabaseData}
+          disabled={loading}
+          title="Refresh Database"
         >
-          <div
-            style={{
-              background: "white",
-              borderRadius: "12px",
-              padding: "30px",
-              maxWidth: "800px",
-              width: "100%",
-              maxHeight: "90vh",
-              overflow: "auto",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "30px",
-                borderBottom: "2px solid #e9ecef",
-                paddingBottom: "15px",
-              }}
-            >
-              <h2 style={{ margin: 0, color: "#2c3e50" }}>Admin Dashboard</h2>
-              <button
-                onClick={() => {
-                  setAdminOpen(false);
-                  setAdminAuth(false);
-                  setAdminPassword("");
-                  setAdminMessage("");
-                }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  fontSize: "24px",
-                  cursor: "pointer",
-                  color: "#6c757d",
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            {!adminAuth ? (
-              <div>
-                <h3 style={{ marginBottom: "20px", color: "#495057" }}>
-                  Admin Authentication
-                </h3>
-                <div style={{ marginBottom: "20px" }}>
-                  <label
-                    style={{
-                      display: "block",
-                      marginBottom: "8px",
-                      fontWeight: "600",
-                      color: "#34495e",
-                    }}
-                  >
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleAdminLogin()}
-                    placeholder="Enter admin password"
-                    style={{
-                      width: "100%",
-                      padding: "12px",
-                      borderRadius: "8px",
-                      border: "2px solid #e9ecef",
-                      fontSize: "16px",
-                    }}
-                  />
-                </div>
-                <button
-                  onClick={handleAdminLogin}
-                  style={{
-                    width: "100%",
-                    padding: "12px",
-                    backgroundColor: "#2c3e50",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "8px",
-                    fontSize: "16px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                  }}
-                >
-                  Login to Admin Panel
-                </button>
-
-                {adminMessage && (
-                  <div
-                    style={{
-                      marginTop: "20px",
-                      padding: "12px",
-                      borderRadius: "8px",
-                      backgroundColor: "#f8d7da",
-                      color: "#721c24",
-                      border: "1px solid #f5c6cb",
-                      textAlign: "center",
-                    }}
-                  >
-                    {adminMessage}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "20px",
-                    marginBottom: "30px",
-                  }}
-                >
-                  <button
-                    onClick={() => setCurrentNewsIndex(0)}
-                    style={{
-                      padding: "10px 20px",
-                      backgroundColor: "#007bff",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "8px",
-                      fontSize: "14px",
-                      fontWeight: "600",
-                      cursor: "pointer",
-                    }}
-                  >
-                    📰 News Management
-                  </button>
-                  <button
-                    onClick={() => setCurrentNewsIndex(1)}
-                    style={{
-                      padding: "10px 20px",
-                      backgroundColor: "#28a745",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "8px",
-                      fontSize: "14px",
-                      fontWeight: "600",
-                      cursor: "pointer",
-                    }}
-                  >
-                    📊 Data Management
-                  </button>
-                </div>
-
-                {/* News Management Section */}
-                <div>
-                  <h3 style={{ marginBottom: "20px", color: "#495057" }}>
-                    📰 News Management
-                  </h3>
-                  <div style={{ marginBottom: "20px" }}>
-                    <label
-                      style={{
-                        display: "block",
-                        marginBottom: "8px",
-                        fontWeight: "600",
-                        color: "#34495e",
-                      }}
-                    >
-                      Headline
-                    </label>
-                    <input
-                      type="text"
-                      value={getCurrentNews().headline}
-                      onChange={(e) => updateHeadline(e.target.value)}
-                      style={{
-                        width: "100%",
-                        padding: "12px",
-                        borderRadius: "8px",
-                        border: "2px solid #e9ecef",
-                        fontSize: "16px",
-                      }}
-                    />
-                  </div>
-                  <div style={{ marginBottom: "15px" }}>
-                    <label
-                      style={{
-                        display: "block",
-                        marginBottom: "8px",
-                        fontWeight: "600",
-                        color: "#34495e",
-                      }}
-                    >
-                      Subtitle
-                    </label>
-                    <textarea
-                      value={getCurrentNews().subtitle}
-                      onChange={(e) => updateSubtitle(e.target.value)}
-                      rows={3}
-                      style={{
-                        width: "100%",
-                        padding: "12px",
-                        borderRadius: "8px",
-                        border: "2px solid #e9ecef",
-                        fontSize: "16px",
-                        resize: "vertical",
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+          {loading ? "⟳" : "🔄"}
+        </button>
+      </div>
     </div>
   );
 }

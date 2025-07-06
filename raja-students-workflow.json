@@ -1,0 +1,119 @@
+{
+  "name": "Raja-students-workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "raja-students",
+        "options": {}
+      },
+      "id": "b1234567-1234-1234-1234-123456789012",
+      "name": "Students Data Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "raja-students-webhook"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "1mpxS49HPbEqbmtgABFKYCEEAzq7i9MZjATrSpWo92dI",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Names",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "b2234567-1234-1234-1234-123456789012",
+      "name": "Read Students from Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [460, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TiFtAx9BIygG3FA7",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process students data into the expected format\nconst items = $input.all();\nconst processedData = {\n  Employee: {},\n  Student: {},\n  timestamp: new Date().toISOString()\n};\n\nconsole.log('📊 Processing', items.length, 'rows from Google Sheets');\n\nitems.forEach((item, index) => {\n  const data = item.json;\n  \n  // Skip header row\n  if (index === 0 || !data.Name || !data.Category) {\n    console.log('⚠️ Skipping row', index, ':', data);\n    return;\n  }\n  \n  const name = data.Name;\n  const category = data.Category;\n  const branch = data.Branch || 'General';\n  const grade = data.Grade || 'General';\n  const area = data.Area || 'General';\n  const status = data.Status;\n  \n  // Skip inactive users\n  if (status && status.toLowerCase() === 'inactive') {\n    console.log('⚠️ Skipping inactive user:', name);\n    return;\n  }\n  \n  if (category === 'Employee') {\n    if (!processedData.Employee[branch]) {\n      processedData.Employee[branch] = [];\n    }\n    processedData.Employee[branch].push(name);\n    console.log('✅ Added employee:', name, 'to', branch);\n  } else if (category === 'Student') {\n    if (!processedData.Student[grade]) {\n      processedData.Student[grade] = {};\n    }\n    if (!processedData.Student[grade][area]) {\n      processedData.Student[grade][area] = [];\n    }\n    processedData.Student[grade][area].push(name);\n    console.log('✅ Added student:', name, 'to', grade, '-', area);\n  }\n});\n\nconsole.log('📊 Final processed data:', processedData);\nreturn [{ json: processedData }];"
+      },
+      "id": "b3234567-1234-1234-1234-123456789012",
+      "name": "Process Students Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "success": true,
+          "data": "={{ $json }}",
+          "method": "n8n-students-reader",
+          "timestamp": "={{ new Date().toISOString() }}"
+        },
+        "options": {}
+      },
+      "id": "b4234567-1234-1234-1234-123456789012",
+      "name": "Return Students Data",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Students Data Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read Students from Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Students from Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Process Students Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Students Data": {
+      "main": [
+        [
+          {
+            "node": "Return Students Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c1234567-1234-1234-1234-123456789012",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "90ad83856706581054f57fa0bb70cd81e9e22ab102df0587e7f89ca2a5e2fd0b"
+  },
+  "id": "d1234567-1234-1234-1234-123456789012",
+  "tags": []
+}

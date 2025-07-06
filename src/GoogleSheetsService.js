@@ -21,43 +21,85 @@ class GoogleSheetsService {
   // Read students data from Google Sheets
   async getStudentsData() {
     try {
-      const url = `${this.BASE_URL}/${this.STUDENTS_SHEET_ID}/values/Students!A2:H?key=${this.API_KEY}`;
+      console.log("🔍 Fetching students data from Google Sheets...");
+
+      // Check if API key is available
+      if (!this.API_KEY || this.API_KEY === "undefined") {
+        console.warn("⚠️ No Google Sheets API key configured");
+        console.log(
+          "💡 To use Google Sheets directly, add REACT_APP_GOOGLE_SHEETS_API_KEY to your .env file"
+        );
+        return this.getFallbackStudentsData();
+      }
+
+      // Use the main sheet ID (from the URL provided) and read from Names tab
+      const MAIN_SHEET_ID = "1mpxS49HPbEqbmtgABFKYCEEAzq7i9MZjATrSpWo92dI";
+      const url = `${this.BASE_URL}/${MAIN_SHEET_ID}/values/Names!A2:H?key=${this.API_KEY}`;
+
+      console.log("📡 Students API URL:", url);
+
       const response = await fetch(url);
       const data = await this.handleResponse(response);
+
+      console.log("📊 Raw students data from Google Sheets:", data);
 
       const studentsData = {
         Employee: {},
         Student: {},
       };
 
-      if (data.values) {
-        data.values.forEach((row) => {
-          const [name, category, branch, grade, area, email, phone, status] =
-            row;
+      if (data.values && data.values.length > 0) {
+        console.log(`🔍 Processing ${data.values.length} student records...`);
+
+        data.values.forEach((row, index) => {
+          const [name, category, branch, grade, area, , , status] = row;
 
           // Skip empty rows
-          if (!name || !category) return;
+          if (!name || !category) {
+            console.log(
+              `⚠️ Skipping row ${index + 2}: missing name or category`
+            );
+            return;
+          }
+
+          // Skip inactive students/employees
+          if (status && status.toLowerCase() === "inactive") {
+            console.log(`⚠️ Skipping ${name}: marked as inactive`);
+            return;
+          }
 
           if (category === "Employee") {
-            if (!studentsData.Employee[branch]) {
-              studentsData.Employee[branch] = [];
+            const empBranch = branch || "General";
+            if (!studentsData.Employee[empBranch]) {
+              studentsData.Employee[empBranch] = [];
             }
-            studentsData.Employee[branch].push(name);
+            studentsData.Employee[empBranch].push(name);
+            console.log(`✅ Added employee: ${name} to ${empBranch}`);
           } else if (category === "Student") {
-            if (!studentsData.Student[grade]) {
-              studentsData.Student[grade] = {};
+            const studentGrade = grade || "General";
+            const studentArea = area || "General";
+
+            if (!studentsData.Student[studentGrade]) {
+              studentsData.Student[studentGrade] = {};
             }
-            if (!studentsData.Student[grade][area]) {
-              studentsData.Student[grade][area] = [];
+            if (!studentsData.Student[studentGrade][studentArea]) {
+              studentsData.Student[studentGrade][studentArea] = [];
             }
-            studentsData.Student[grade][area].push(name);
+            studentsData.Student[studentGrade][studentArea].push(name);
+            console.log(
+              `✅ Added student: ${name} to ${studentGrade} - ${studentArea}`
+            );
           }
         });
+      } else {
+        console.log("⚠️ No students data found in Google Sheets");
       }
 
+      console.log("✅ Final processed students data:", studentsData);
       return studentsData;
     } catch (error) {
-      console.error("Error fetching students data:", error);
+      console.error("❌ Error fetching students data:", error);
+      console.log("🔄 Using fallback data due to error");
       return this.getFallbackStudentsData();
     }
   }
@@ -65,7 +107,12 @@ class GoogleSheetsService {
   // Read news data from Google Sheets
   async getNewsData() {
     try {
-      const url = `${this.BASE_URL}/${this.NEWS_SHEET_ID}/values/News!A2:G?key=${this.API_KEY}`;
+      // Use the main sheet ID (same as students data) and read from News tab
+      const MAIN_SHEET_ID = "1mpxS49HPbEqbmtgABFKYCEEAzq7i9MZjATrSpWo92dI";
+      const url = `${this.BASE_URL}/${MAIN_SHEET_ID}/values/News!A2:G?key=${this.API_KEY}`;
+
+      console.log("📡 News API URL:", url);
+
       const response = await fetch(url);
       const data = await this.handleResponse(response);
 
@@ -206,69 +253,33 @@ class GoogleSheetsService {
     }
   }
 
-  // Fallback data when API is not available
+  // Fallback data when API is not available - Returns empty structure
   getFallbackStudentsData() {
+    console.log("⚠️ Using empty fallback data - database connection required");
     return {
-      Employee: {
-        "Admin Office": ["Alice", "Bob"],
-        "Teaching Staff": ["Charlie", "Diana"],
-      },
-      Student: {
-        "Grade 1": {
-          "North Wing": ["Eren", "Mikasa"],
-          "South Wing": ["Armin", "Jean"],
-        },
-        "Grade 2": {
-          "North Wing": ["Sasha", "Connie"],
-          "South Wing": ["Levi", "Historia"],
-        },
-      },
+      Employee: {},
+      Student: {},
     };
   }
 
   getFallbackNewsData() {
     return [
       {
-        headline: "RaJA School Announces New Digital Attendance System",
-        subtitle:
-          "Streamlined attendance tracking for students and staff with real-time monitoring and comprehensive reporting.",
+        headline: "RaJA Attendance System",
+        subtitle: "Please connect to database to load news and student data",
         image: null,
         showImage: false,
         priority: "High",
-        dateCreated: "2024-01-15",
-        status: "Active",
-      },
-      {
-        headline: "Annual Science Fair Winners Announced",
-        subtitle:
-          "Congratulations to our Grade 2 students who won first place in the regional science competition with their innovative renewable energy project.",
-        image: null,
-        showImage: false,
-        priority: "Medium",
-        dateCreated: "2024-01-16",
-        status: "Active",
-      },
-      {
-        headline: "New Library Resources Available",
-        subtitle:
-          "We have expanded our digital library with over 10,000 new e-books and educational resources for all grade levels.",
-        image: null,
-        showImage: false,
-        priority: "Low",
-        dateCreated: "2024-01-17",
-        status: "Active",
-      },
-      {
-        headline: "Sports Day Registration Now Open",
-        subtitle:
-          "Join us for our annual sports day featuring track events, team sports, and fun activities for all students and staff.",
-        image: null,
-        showImage: false,
-        priority: "High",
-        dateCreated: "2024-01-18",
+        dateCreated: new Date().toISOString().split("T")[0],
         status: "Active",
       },
     ];
+  }
+
+  // Refresh students data by forcing a new fetch
+  async refreshStudentsData() {
+    console.log("🔄 Refreshing students data from Google Sheets...");
+    return await this.getStudentsData();
   }
 
   // Check if Google Sheets integration is configured
@@ -314,4 +325,5 @@ class GoogleSheetsService {
   }
 }
 
-export default new GoogleSheetsService();
+const googleSheetsService = new GoogleSheetsService();
+export default googleSheetsService;

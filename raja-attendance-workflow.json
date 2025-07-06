@@ -1,0 +1,328 @@
+{
+  "name": "RaJA Attendance API",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "path": "raja-attendance",
+        "options": {
+          "responseMode": "responseNode"
+        }
+      },
+      "id": "webhook-attendance",
+      "name": "Attendance Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "raja-attendance-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "validation-name",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "validation-category",
+              "leftValue": "={{ $json.category }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            },
+            {
+              "id": "validation-action",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combineOperation": "all"
+        }
+      },
+      "id": "data-validation",
+      "name": "Data Validation",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process attendance data with server-side validation\nconst name = $json.name;\nconst category = $json.category;\nconst action = $json.action;\n\n// Add server timestamp for reliability\nconst serverTimestamp = new Date().toISOString();\nconst serverTime = new Date().toLocaleTimeString('en-US', { \n  hour12: false, \n  hour: '2-digit', \n  minute: '2-digit' \n});\nconst serverDate = new Date().toISOString().split('T')[0];\n\n// Prepare structured data for Google Sheets\nconst attendanceRecord = {\n  name: name,\n  category: category,\n  action: action,\n  timestamp: serverTimestamp,\n  date: serverDate,\n  time: serverTime,\n  branch: $json.branch || '',\n  grade: $json.grade || '',\n  area: $json.area || '',\n  status: action === 'present' ? 'present' : action === 'login' ? 'present' : 'absent',\n  processed_by: 'n8n-api',\n  client_timestamp: $json.timestamp || serverTimestamp,\n  client_date: $json.date || serverDate,\n  client_time: $json.time || serverTime,\n  source: 'react-app'\n};\n\nconsole.log('✅ Processing attendance record:', attendanceRecord);\n\nreturn attendanceRecord;"
+      },
+      "id": "process-attendance-data",
+      "name": "Process Attendance Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": "1mpxS49HPbEqbmtgABFKYCEEAzq7i9MZjATrSpWo92dI",
+        "sheetName": "Attendance",
+        "options": {
+          "range": "A:Z"
+        }
+      },
+      "id": "check-existing-attendance",
+      "name": "Check Existing Attendance",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check for duplicate attendance entries\nconst currentRecord = $input.first().json;\nconst existingRecords = $input.last().json;\n\nconst name = currentRecord.name;\nconst date = currentRecord.date;\n\nconsole.log(`🔍 Checking duplicates for ${name} on ${date}`);\nconsole.log(`📊 Found ${existingRecords.length} existing records`);\n\n// Find existing record for today\nconst existingToday = existingRecords.find(record => \n  record.name === name && record.date === date\n);\n\nif (existingToday) {\n  console.log('⚠️ Duplicate found:', existingToday);\n  return {\n    isDuplicate: true,\n    message: `${name} already has an entry for today (${existingToday.action} at ${existingToday.time})`,\n    existingRecord: existingToday,\n    currentRecord: currentRecord\n  };\n} else {\n  console.log('✅ No duplicate found, proceeding with attendance');\n  return {\n    isDuplicate: false,\n    message: 'No duplicate found, proceeding with attendance',\n    currentRecord: currentRecord\n  };\n}"
+      },
+      "id": "check-duplicate",
+      "name": "Check Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "not-duplicate",
+              "leftValue": "={{ $json.isDuplicate }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combineOperation": "all"
+        }
+      },
+      "id": "duplicate-check",
+      "name": "Duplicate Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": "1mpxS49HPbEqbmtgABFKYCEEAzq7i9MZjATrSpWo92dI",
+        "sheetName": "Attendance",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "name": "={{ $json.currentRecord.name }}",
+            "category": "={{ $json.currentRecord.category }}",
+            "action": "={{ $json.currentRecord.action }}",
+            "timestamp": "={{ $json.currentRecord.timestamp }}",
+            "date": "={{ $json.currentRecord.date }}",
+            "time": "={{ $json.currentRecord.time }}",
+            "branch": "={{ $json.currentRecord.branch }}",
+            "grade": "={{ $json.currentRecord.grade }}",
+            "area": "={{ $json.currentRecord.area }}",
+            "status": "={{ $json.currentRecord.status }}",
+            "processed_by": "={{ $json.currentRecord.processed_by }}",
+            "client_timestamp": "={{ $json.currentRecord.client_timestamp }}",
+            "client_date": "={{ $json.currentRecord.client_date }}",
+            "client_time": "={{ $json.currentRecord.client_time }}",
+            "source": "={{ $json.currentRecord.source }}"
+          }
+        }
+      },
+      "id": "write-attendance",
+      "name": "Write to Attendance Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1560, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "success": true,
+          "message": "Attendance recorded successfully",
+          "data": {
+            "name": "={{ $json.currentRecord.name }}",
+            "action": "={{ $json.currentRecord.action }}",
+            "timestamp": "={{ $json.currentRecord.timestamp }}",
+            "date": "={{ $json.currentRecord.date }}",
+            "time": "={{ $json.currentRecord.time }}",
+            "processed_by": "n8n-api"
+          },
+          "method": "n8n-webhook"
+        }
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "success": false,
+          "error": "Duplicate attendance",
+          "message": "={{ $json.message }}",
+          "existingRecord": "={{ $json.existingRecord }}",
+          "method": "n8n-webhook"
+        },
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "duplicate-response",
+      "name": "Duplicate Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": {
+          "success": false,
+          "error": "Invalid data provided",
+          "message": "Please provide name, category, and action",
+          "received": "={{ $json }}",
+          "method": "n8n-webhook"
+        },
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 400]
+    }
+  ],
+  "connections": {
+    "Attendance Webhook": {
+      "main": [
+        [
+          {
+            "node": "Data Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Validation": {
+      "main": [
+        [
+          {
+            "node": "Process Attendance Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Attendance Data": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Attendance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Attendance": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Duplicate Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Duplicate Check": {
+      "main": [
+        [
+          {
+            "node": "Write to Attendance Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Duplicate Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write to Attendance Sheet": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["attendance", "api", "raja-school"],
+  "triggerCount": 1,
+  "versionId": "1"
+}

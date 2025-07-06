@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>n8n Workflow Test</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 20px; }
+      .test-container { max-width: 600px; margin: 0 auto; }
+      .result { margin-top: 20px; padding: 15px; border-radius: 5px; }
+      .success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+      .error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+      .info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #b8daff; }
+      pre { background-color: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+      button { padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+      button:hover { background-color: #0056b3; }
+    </style>
+  </head>
+  <body>
+    <div class="test-container">
+      <h1>🧪 n8n Workflow Test</h1>
+      <p>This tool helps you test your n8n workflow endpoint directly.</p>
+
+      <div class="info">
+        <h3>📋 Instructions:</h3>
+        <ol>
+          <li>
+            Go to your n8n instance: <code>https://n8n.evanserv.com</code>
+          </li>
+          <li>
+            Import your workflow from <code>raja-students-workflow.json</code>
+          </li>
+          <li>
+            <strong
+              >Make sure your Google Sheets has a tab named "Names"</strong
+            >
+            (not "Students")
+          </li>
+          <li>
+            <strong>Activate the workflow</strong> (toggle the switch to ON)
+          </li>
+          <li>Click the test button below</li>
+        </ol>
+      </div>
+
+      <button onclick="testWorkflow()">🚀 Test n8n Workflow</button>
+
+      <div id="result"></div>
+    </div>
+
+    <script>
+      async function testWorkflow() {
+          const resultDiv = document.getElementById('result');
+          resultDiv.innerHTML = '<div class="info">🔄 Testing n8n workflow...</div>';
+
+          try {
+              const response = await fetch('https://n8n.evanserv.com/webhook/raja-students', {
+                  method: 'GET',
+                  headers: {
+                      'Accept': 'application/json',
+                      'Content-Type': 'application/json'
+                  }
+              });
+
+              const data = await response.json();
+
+              console.log('n8n Response:', data);
+
+              if (data.success && data.data && (data.data.Student || data.data.Employee)) {
+                  resultDiv.innerHTML = `
+                      <div class="success">
+                          <h3>✅ Success!</h3>
+                          <p>Your n8n workflow is working correctly!</p>
+                          <p><strong>Students:</strong> ${Object.keys(data.data.Student || {}).length} grades</p>
+                          <p><strong>Employees:</strong> ${Object.keys(data.data.Employee || {}).length} branches</p>
+                      </div>
+                      <details>
+                          <summary>📊 Full Response Data</summary>
+                          <pre>${JSON.stringify(data, null, 2)}</pre>
+                      </details>
+                  `;
+              } else if (data.message === "Workflow was started") {
+                  resultDiv.innerHTML = `
+                      <div class="error">
+                          <h3>⚠️ Workflow Not Activated</h3>
+                          <p>Your workflow is not activated. Please:</p>
+                          <ol>
+                              <li>Go to your n8n instance</li>
+                              <li>Find your "Raja-students-reader-workflow"</li>
+                              <li>Click the toggle switch to activate it</li>
+                              <li>Test again</li>
+                          </ol>
+                      </div>
+                      <details>
+                          <summary>📋 Response</summary>
+                          <pre>${JSON.stringify(data, null, 2)}</pre>
+                      </details>
+                  `;
+              } else {
+                  resultDiv.innerHTML = `
+                      <div class="error">
+                          <h3>❌ Unexpected Response</h3>
+                          <p>The workflow returned an unexpected response format.</p>
+                      </div>
+                      <details>
+                          <summary>📋 Response</summary>
+                          <pre>${JSON.stringify(data, null, 2)}</pre>
+                      </details>
+                  `;
+              }
+          } catch (error) {
+              console.error('Test error:', error);
+              resultDiv.innerHTML = `
+                  <div class="error">
+                      <h3>❌ Test Failed</h3>
+                      <p><strong>Error:</strong> ${error.message}</p>
+                      <p>This could mean:</p>
+                      <ul>
+                          <li>The n8n instance is not accessible</li>
+                          <li>The workflow doesn't exist</li>
+                          <li>Network connectivity issues</li>
+                      </ul>
+                  </div>
+              `;
+          }
+      }
+    </script>
+  </body>
+</html>
